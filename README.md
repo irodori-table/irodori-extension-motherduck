@@ -1,61 +1,69 @@
 # MotherDuck Connector
 
-Adds MotherDuck connectivity as an installable connector extension.
+Native Irodori Table connector extension for MotherDuck.
 
-This connector is listed in the public Irodori extension marketplace.
+This crate packages the connector metadata, native ABI exports, and driver implementation used by the Irodori extension marketplace.
 
 ## Connector
 
 - Extension ID: `irodori.motherduck`
 - Engine ID: `motherduck`
-- Wire: `duckdb`
+- Wire protocol: `duckdb`
 - Default port: `443`
 - Native ABI: `irodori.connector.native.v1`
-- Driver linked: `true`
+- Driver linked: `yes`
+- Marketplace visibility: `public`
+- Package version: `0.1.1`
 
-A desktop adapter source snapshot is staged in `native/source/` from `db/duck.rs`.
+The package includes a desktop adapter source snapshot from `db/duck.rs`.
 
 Connector metadata lives in `connector.config.json` and `irodori.extension.json`.
-The Rust code keeps native ABI exports in `src/lib.rs`, shared buffer/JSON helpers in `src/abi.rs`, and DuckDB-compatible connect/query/metadata behavior in `src/driver.rs`.
+The Rust crate exports the native ABI from `src/lib.rs`, uses `irodori-connector-abi` for shared JSON/buffer helpers, and keeps connector behavior in `src/driver.rs`.
 
 ## Connection Metadata
 
 - Endpoint modes: `motherduckService`, `localFile`, `inMemory`, `connectionString`
 - Transport modes: `direct`, `sshTunnel`, `socks5Proxy`, `httpConnectProxy`, `proxyChain`
-- TLS supported: `true`
-- Custom driver options: `true`
+- TLS supported: `yes`
+- TLS required by default: `yes`
+- Custom driver options: `yes`
 
-| Auth method | Label | Secret purposes |
-|---|---|---|
-| `none` | No authentication | none |
-| `connectionString` | Connection string / DSN | none |
-| `motherduckToken` | MotherDuck token | `token` |
-| `oauth2` | OAuth 2.0 | `token` |
-| `browserSso` | Browser SSO | `token` |
-| `customDriverOptions` | Custom driver options | `password`, `token`, `privateKey`, `privateKeyPassphrase` |
+### Endpoint Fields
 
-## ABI Calls
+| Field | Label | Type | Required |
+| --- | --- | --- | --- |
+| `database` | MotherDuck database or DuckDB file | `string` | no |
+| `host` | MotherDuck endpoint | `string` | no |
 
-The scaffold handles these JSON requests today:
+## Authentication
+
+The connector advertises these authentication modes so clients can render the right credential fields. Driver-specific or provider-specific values can still be passed through `options` when needed.
+
+| Auth method | Label | Kind | Secret purposes |
+| --- | --- | --- | --- |
+| `none` | No authentication | `none` | none |
+| `connectionString` | Connection string / DSN | `connectionString` | none |
+| `motherduckToken` | MotherDuck token | `token` | `token` |
+| `oauth2` | OAuth 2.0 | `oauth2` | `token` |
+| `browserSso` | Browser SSO | `browserSso` | `token` |
+| `customDriverOptions` | Custom driver options | `custom` | `password`, `token`, `privateKey`, `privateKeyPassphrase` |
+
+## Native ABI Calls
 
 | Method | Response |
-|---|---|
-| `health` / `ping` | Connector health, engine id, ABI version, and driver link status. |
-| `describe` / `capabilities` | Embedded manifest and connector config. |
-| `manifest` | Raw `irodori.extension.json`. |
-| `config` | Raw `connector.config.json`. |
-| `connect` | Opens an in-memory/local DuckDB-compatible connection. |
-| `query` | Runs SQL and returns columns, rows, and truncation status. |
-| `metadata` | Returns schema/table/column metadata. |
-| `close` | Closes the named connector connection. |
-
-Driver operations return structured connector errors for invalid requests, missing connections, and backend failures.
+| --- | --- |
+| `health` | Returns connector health, engine id, ABI version, and driver status. |
+| `describe` | Returns the embedded manifest and connector config. |
+| `manifest` | Returns raw `irodori.extension.json`. |
+| `config` | Returns raw `connector.config.json`. |
+| `connect` | Opens and validates a native connector connection. |
+| `query` | Runs a connector query and returns structured rows or JSON results. |
+| `metadata` | Reads schemas, tables, columns, indexes, collections, or equivalent metadata. |
+| `close` | Closes and removes a cached native connection. |
 
 ## Development
 
-
-DuckDB-linked builds share `../target` across sibling extension repositories. Normal `make check` and CI set `DUCKDB_DOWNLOAD_LIB=1` so libduckdb comes from the prebuilt upstream archive instead of a local C++ build. Run `make check-duckdb-bundled` only when a fully self-contained DuckDB build is required, because it compiles libduckdb C++ and can consume significant CPU.
-
+All extension crates in this checkout share `../target` so dependencies compile once across sibling repositories.
 
 ```sh
 make check
