@@ -19,13 +19,13 @@ fmt:
 	$(CARGO) fmt --check
 
 lint:
-	DUCKDB_DOWNLOAD_LIB=1 $(CARGO) clippy --all-targets --no-default-features -- -D warnings
+	$(CARGO) clippy --all-targets --features bundled-duckdb -- -D warnings
 
 build:
-	DUCKDB_DOWNLOAD_LIB=1 $(CARGO) build --release --no-default-features
+	$(CARGO) build --release --features bundled-duckdb
 
 test:
-	DUCKDB_DOWNLOAD_LIB=1 $(CARGO) test --no-default-features
+	$(CARGO) test --features bundled-duckdb
 
 package: build
 	mkdir -p dist/native
