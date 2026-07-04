@@ -1,31 +1,33 @@
 CARGO ?= cargo
-CARGO_TARGET_DIR ?= ../target
+CARGO_TARGET_DIR ?= $(abspath ../target)
 CARGO_BUILD_JOBS ?= 2
 EXTENSION_PACKAGE := irodori-extension-motherduck.tar.gz
 LIB_NAME := irodori_extension_motherduck
+DUCKDB_ENV := DUCKDB_DOWNLOAD_LIB=1
+DUCKDB_RUSTFLAGS ?= -C link-arg=-Wl,-rpath,$$ORIGIN
 export CARGO_TARGET_DIR
 export CARGO_BUILD_JOBS
 
-.PHONY: build check check-duckdb-bundled fmt lint test package clean
+.PHONY: build check check-duckdb-download fmt lint test package clean
 
 check: fmt lint test
 
-check-duckdb-bundled: fmt
-	$(CARGO) clippy --all-targets --features bundled-duckdb -- -D warnings
-	$(CARGO) test --features bundled-duckdb
+check-duckdb-download: fmt
+	$(DUCKDB_ENV) RUSTFLAGS='$(DUCKDB_RUSTFLAGS)' $(CARGO) clippy --all-targets -- -D warnings
+	$(DUCKDB_ENV) RUSTFLAGS='$(DUCKDB_RUSTFLAGS)' $(CARGO) test
 
 
 fmt:
 	$(CARGO) fmt --check
 
 lint:
-	$(CARGO) clippy --all-targets --features bundled-duckdb -- -D warnings
+	$(DUCKDB_ENV) RUSTFLAGS='$(DUCKDB_RUSTFLAGS)' $(CARGO) clippy --all-targets -- -D warnings
 
 build:
-	$(CARGO) build --release --features bundled-duckdb
+	$(DUCKDB_ENV) RUSTFLAGS='$(DUCKDB_RUSTFLAGS)' $(CARGO) build --release
 
 test:
-	$(CARGO) test --features bundled-duckdb
+	$(DUCKDB_ENV) RUSTFLAGS='$(DUCKDB_RUSTFLAGS)' $(CARGO) test
 
 package: build
 	mkdir -p dist/native
@@ -33,6 +35,9 @@ package: build
 	cp $(CARGO_TARGET_DIR)/release/lib$(LIB_NAME).so dist/native/ 2>/dev/null || true
 	cp $(CARGO_TARGET_DIR)/release/$(LIB_NAME).dll dist/native/ 2>/dev/null || true
 	cp $(CARGO_TARGET_DIR)/release/lib$(LIB_NAME).dylib dist/native/ 2>/dev/null || true
+	cp $(CARGO_TARGET_DIR)/release/deps/libduckdb.so dist/native/ 2>/dev/null || true
+	cp $(CARGO_TARGET_DIR)/release/deps/duckdb.dll dist/native/ 2>/dev/null || true
+	cp $(CARGO_TARGET_DIR)/release/deps/libduckdb.dylib dist/native/ 2>/dev/null || true
 	tar -czf dist/$(EXTENSION_PACKAGE) README.md LICENSE-MIT LICENSE-0BSD connector.config.json connector.source.json irodori.extension.json dist/native
 
 clean:
