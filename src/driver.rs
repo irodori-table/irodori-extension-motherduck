@@ -65,17 +65,155 @@ pub fn call_json(request: IrodoriConnectorBuffer) -> IrodoriConnectorBuffer {
     }
 }
 
+/// What the profile is actually asking us to open.
+///
+/// This connector shipped as a byte-identical copy of the DuckDB one, so an
+/// `md:` target was handed straight to `duckdb::Connection::open` — which does
+/// not resolve MotherDuck and, on most platforms, quietly creates a *local file
+/// named `md:whatever`*. The token the user typed was never read at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Target {
+    InMemory,
+    LocalFile(String),
+    /// A MotherDuck database, with the part after `md:` (empty means the
+    /// account's default database).
+    MotherDuck(String),
+}
+
+impl Target {
+    fn from_request(request: &Value) -> Self {
+        let raw = option_string(request, &["database", "url", "connectionString", "dsn"])
+            .unwrap_or_default();
+        let raw = raw.trim();
+        match raw {
+            "" | ":memory:" => Self::InMemory,
+            _ => match motherduck_database(raw) {
+                Some(database) => Self::MotherDuck(database),
+                None => Self::LocalFile(raw.to_string()),
+            },
+        }
+    }
+}
+
+/// The database part of a MotherDuck target, for the spellings the connection
+/// form offers: `md:`, `md:name`, `motherduck:name`, and the URL form
+/// `motherduck://token@md/name` the placeholder shows.
+fn motherduck_database(raw: &str) -> Option<String> {
+    // Case-insensitive: a user who types `MD:analytics` means MotherDuck, and
+    // treating it as a local path is the exact failure this connector had.
+    let lowered = raw.to_ascii_lowercase();
+    for prefix in ["md:", "motherduck:"] {
+        if lowered.starts_with(prefix) {
+            // Slice the original, not the lowercased copy — a database name is
+            // case-sensitive even though its scheme is not.
+            let rest = &raw[prefix.len()..];
+            let rest = rest.trim_start_matches('/');
+            // `motherduck://token@md/name`
+            if let Some((_, after_at)) = rest.split_once('@') {
+                let name = after_at.trim_start_matches("md").trim_start_matches('/');
+                return Some(name.to_string());
+            }
+            return Some(rest.to_string());
+        }
+    }
+    None
+}
+
+/// The MotherDuck service token, or `None` when the profile carries none.
+///
+/// The connection form labels this engine's password box "MotherDuck token", so
+/// `password` is where a token entered through the UI arrives. The environment
+/// variable is MotherDuck's own convention and stays as the last resort.
+fn motherduck_token(request: &Value) -> Option<String> {
+    option_string(
+        request,
+        &["motherduckToken", "motherduck_token", "token", "password"],
+    )
+    .or_else(|| std::env::var("motherduck_token").ok())
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty())
+}
+
+/// Resolve a field from anywhere the host may put it.
+///
+/// `abi::profile_field` looks at the request and its `profile`, but connector
+/// options arrive under `profile.options` — so a token entered as a connector
+/// option would be invisible to it. This walks the same containers the other
+/// connectors' `option_string` does.
+fn option_string(request: &Value, fields: &[&str]) -> Option<String> {
+    let containers = [
+        Some(request),
+        request.get("profile"),
+        request.get("options"),
+        request.get("secrets"),
+        request.get("profile").and_then(|p| p.get("options")),
+        request.get("profile").and_then(|p| p.get("secrets")),
+    ];
+    containers.into_iter().flatten().find_map(|container| {
+        fields.iter().find_map(|field| {
+            container
+                .get(*field)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        })
+    })
+}
+
+/// Open a MotherDuck database: load the extension, apply the token, then attach.
+///
+/// The token is set through DuckDB's settings rather than embedded in the
+/// connection string so it never appears in an error message that quotes the
+/// target.
+fn open_motherduck(database: &str, token: Option<&str>) -> Result<duckdb::Connection, String> {
+    let conn = duckdb::Connection::open_in_memory()
+        .map_err(|err| format!("MotherDuck connect failed: {err}"))?;
+    conn.execute_batch("install motherduck; load motherduck;")
+        .map_err(|err| format!("loading the MotherDuck extension failed: {err}"))?;
+    if let Some(token) = token {
+        conn.execute_batch(&format!("set motherduck_token = {}", sql_string(token)))
+            .map_err(|_| "applying the MotherDuck token failed.".to_string())?;
+    }
+    let attach = if database.is_empty() {
+        "attach 'md:'".to_string()
+    } else {
+        format!("attach {}", sql_string(&format!("md:{database}")))
+    };
+    conn.execute_batch(&attach)
+        .map_err(|err| format!("attaching the MotherDuck database failed: {err}"))?;
+    Ok(conn)
+}
+
+fn sql_string(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
 fn connect(request: &Value) -> IrodoriConnectorBuffer {
     let connection_id = abi::connection_id(Some(request));
-    let database =
-        abi::profile_field(request, "database").or_else(|| abi::profile_field(request, "url"));
-    let conn = match database.map(str::trim) {
-        None | Some("") | Some(":memory:") => duckdb::Connection::open_in_memory(),
-        Some(path) => duckdb::Connection::open(path),
+    let target = Target::from_request(request);
+    let conn = match &target {
+        Target::InMemory => {
+            duckdb::Connection::open_in_memory().map_err(|err| format!("connect failed: {err}"))
+        }
+        Target::LocalFile(path) => {
+            duckdb::Connection::open(path).map_err(|err| format!("connect failed: {err}"))
+        }
+        Target::MotherDuck(database) => {
+            let token = motherduck_token(request);
+            if token.is_none() {
+                return abi::error(
+                    "connector.invalidRequest",
+                    "MotherDuck needs a service token. Enter it in the MotherDuck \
+                     token field, or set the motherduck_token environment variable.",
+                );
+            }
+            open_motherduck(database, token.as_deref())
+        }
     };
     let conn = match conn {
         Ok(conn) => conn,
-        Err(err) => return abi::error("connector.connectFailed", format!("connect failed: {err}")),
+        Err(err) => return abi::error("connector.connectFailed", err),
     };
     let server_version = duckdb_version(&conn).unwrap_or_else(|| "unknown".to_string());
     if should_seed_sample(request, &connection_id) {
@@ -394,6 +532,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use serde_json::{json, Value};
 
     use crate::{
@@ -469,5 +608,93 @@ mod tests {
         );
         assert_eq!(response["ok"], false);
         assert_eq!(response["error"]["code"], "connector.queryFailed");
+    }
+
+    #[test]
+    fn a_local_path_is_still_a_local_file() {
+        assert_eq!(
+            Target::from_request(&json!({ "profile": { "database": "/tmp/analytics.duckdb" } })),
+            Target::LocalFile("/tmp/analytics.duckdb".to_string())
+        );
+        assert_eq!(
+            Target::from_request(&json!({ "profile": { "database": ":memory:" } })),
+            Target::InMemory
+        );
+        assert_eq!(
+            Target::from_request(&json!({ "profile": {} })),
+            Target::InMemory
+        );
+    }
+
+    #[test]
+    fn an_md_target_is_recognised_rather_than_opened_as_a_file() {
+        // The bug this fixes: `md:analytics` used to reach
+        // `duckdb::Connection::open`, which creates a local file with that
+        // name instead of resolving MotherDuck.
+        assert_eq!(
+            Target::from_request(&json!({ "profile": { "database": "md:analytics" } })),
+            Target::MotherDuck("analytics".to_string())
+        );
+        assert_eq!(
+            Target::from_request(&json!({ "profile": { "database": "md:" } })),
+            Target::MotherDuck(String::new())
+        );
+        assert_eq!(
+            Target::from_request(&json!({ "profile": { "database": "motherduck:sales" } })),
+            Target::MotherDuck("sales".to_string())
+        );
+    }
+
+    #[test]
+    fn the_scheme_is_case_insensitive_but_the_name_is_not() {
+        assert_eq!(
+            motherduck_database("MD:Analytics"),
+            Some("Analytics".to_string())
+        );
+        assert_eq!(
+            motherduck_database("MotherDuck:Sales"),
+            Some("Sales".to_string())
+        );
+        // A local path must not be mistaken for a MotherDuck target.
+        assert_eq!(motherduck_database("/tmp/analytics.duckdb"), None);
+        assert_eq!(motherduck_database("analytics.duckdb"), None);
+    }
+
+    #[test]
+    fn the_url_form_from_the_form_placeholder_is_understood() {
+        // `motherduck://token@md/database` is what the connection form shows.
+        assert_eq!(
+            motherduck_database("motherduck://tok@md/warehouse"),
+            Some("warehouse".to_string())
+        );
+    }
+
+    #[test]
+    fn the_token_comes_from_the_password_field() {
+        // The form labels this engine's password box "MotherDuck token".
+        assert_eq!(
+            motherduck_token(&json!({ "profile": { "password": "md_tok" } })).as_deref(),
+            Some("md_tok")
+        );
+        assert_eq!(
+            motherduck_token(
+                &json!({ "profile": { "options": { "motherduckToken": "explicit" } } })
+            )
+            .as_deref(),
+            Some("explicit")
+        );
+    }
+
+    #[test]
+    fn a_blank_token_is_no_token() {
+        assert_eq!(
+            motherduck_token(&json!({ "profile": { "password": "   " } })),
+            None
+        );
+    }
+
+    #[test]
+    fn the_token_is_quoted_against_injection() {
+        assert_eq!(sql_string("it's"), "'it''s'");
     }
 }
