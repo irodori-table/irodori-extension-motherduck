@@ -1,3 +1,4 @@
+use irodori_connector_abi::option_string;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
@@ -140,27 +141,6 @@ fn motherduck_token(request: &Value) -> Option<String> {
 /// options arrive under `profile.options` — so a token entered as a connector
 /// option would be invisible to it. This walks the same containers the other
 /// connectors' `option_string` does.
-fn option_string(request: &Value, fields: &[&str]) -> Option<String> {
-    let containers = [
-        Some(request),
-        request.get("profile"),
-        request.get("options"),
-        request.get("secrets"),
-        request.get("profile").and_then(|p| p.get("options")),
-        request.get("profile").and_then(|p| p.get("secrets")),
-    ];
-    containers.into_iter().flatten().find_map(|container| {
-        fields.iter().find_map(|field| {
-            container
-                .get(*field)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-        })
-    })
-}
-
 /// Open a MotherDuck database: load the extension, apply the token, then attach.
 ///
 /// The token is set through DuckDB's settings rather than embedded in the
