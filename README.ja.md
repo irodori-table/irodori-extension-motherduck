@@ -48,8 +48,6 @@ Rust クレートは `src/lib.rs` からネイティブ ABI をエクスポー�
 | `none` | 認証なし | `none` | なし |
 | `connectionString` | 接続文字列 / DSN | `connectionString` | なし |
 | `motherduckToken` | MotherDuck トークン | `token` | `token` |
-| `oauth2` | OAuth 2.0 | `oauth2` | `token` |
-| `browserSso` | ブラウザ SSO | `browserSso` | `token` |
 | `customDriverOptions` | カスタムドライバーオプション | `custom` | `password`, `token`, `privateKey`, `privateKeyPassphrase` |
 
 ## ネイティブ ABI 呼び出し
