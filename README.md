@@ -1,6 +1,3 @@
-<!-- i18n: language-switcher -->
-[English](README.md) | [日本語](README.ja.md)
-
 # MotherDuck Connector
 
 Native Irodori Table connector extension for MotherDuck.
@@ -16,7 +13,7 @@ This crate packages the connector metadata, native ABI exports, and driver imple
 - Native ABI: `irodori.connector.native.v1`
 - Driver linked: `yes`
 - Marketplace visibility: `public`
-- Package version: `0.1.3`
+- Package version: `0.1.6`
 
 The package includes a desktop adapter source snapshot from `db/duck.rs`.
 
@@ -47,8 +44,6 @@ The connector advertises these authentication modes so clients can render the ri
 | `none` | No authentication | `none` | none |
 | `connectionString` | Connection string / DSN | `connectionString` | none |
 | `motherduckToken` | MotherDuck token | `token` | `token` |
-| `oauth2` | OAuth 2.0 | `oauth2` | `token` |
-| `browserSso` | Browser SSO | `browserSso` | `token` |
 | `customDriverOptions` | Custom driver options | `custom` | `password`, `token`, `privateKey`, `privateKeyPassphrase` |
 
 ## Native ABI Calls
@@ -74,7 +69,3 @@ make build
 ```
 
 Release packages place platform-specific native artifacts under `dist/native`.
-
-## License
-
-0BSD. You can use, copy, modify, and distribute this project for almost any purpose.
