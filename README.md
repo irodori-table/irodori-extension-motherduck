@@ -47,8 +47,6 @@ The connector advertises these authentication modes so clients can render the ri
 | `none` | No authentication | `none` | none |
 | `connectionString` | Connection string / DSN | `connectionString` | none |
 | `motherduckToken` | MotherDuck token | `token` | `token` |
-| `oauth2` | OAuth 2.0 | `oauth2` | `token` |
-| `browserSso` | Browser SSO | `browserSso` | `token` |
 | `customDriverOptions` | Custom driver options | `custom` | `password`, `token`, `privateKey`, `privateKeyPassphrase` |
 
 ## Native ABI Calls
