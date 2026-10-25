@@ -50,8 +50,6 @@
       "none",
       "connectionString",
       "motherduckToken",
-      "oauth2",
-      "browserSso",
       "customDriverOptions"
     ],
     "tls": "required",
